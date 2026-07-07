@@ -1,291 +1,267 @@
 """
-FIFA World Cup 2026 Tracker — a tiny FastAPI app for Vercel.
-
-Endpoints
-    GET  /              -> HTML dashboard
-    GET  /api           -> API metadata
-    GET  /api/health    -> health check
-    GET  /api/tournament -> tournament summary (dates, hosts, format)
-    GET  /api/highlights -> curated highlights & storylines
-    GET  /api/predictions -> title-odds predictions with reasoning
-    GET  /api/predictions/top?limit=N -> top-N contenders
-    GET  /api/teams     -> confirmed / likely qualified teams
-
-Since the 2026 tournament hasn't kicked off yet, "highlights" reflect the
-qualification cycle and pre-tournament storylines. Predictions are model-free
-heuristic ratings — treat them as opinions, not oracles.
+FIFA World Cup 2026 Tracker — FastAPI on Vercel
+Cron: hourly fetch of fixtures/scores from API-Football
+Dashboard: Scores & Schedule | Predictions (tabbed)
 """
 
 from __future__ import annotations
 
-from datetime import date
-from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse
+import json
+import os
+import urllib.request
+from datetime import date, datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 
 app = FastAPI(
     title="World Cup 2026 Tracker",
-    description="Highlights, predictions and a live dashboard for FIFA World Cup 2026.",
-    version="1.0.0",
+    version="2.0.0",
 )
 
+# --------------------------------------------------------------------------- #
+# Config                                                                      #
+# --------------------------------------------------------------------------- #
+API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY", "")
+API_BASE = "https://v3.football.api-sports.io"
+WORLD_CUP_LEAGUE_ID = 1  # FIFA World Cup
+WORLD_CUP_SEASON = 2026
+
+# Vercel doesn't have persistent filesystem in production, so we keep a
+# lightweight in-memory cache that gets populated on cron runs (and survives
+# within a single function instance's warm lifetime).
+_cache: dict[str, Any] = {"fixtures": [], "last_updated": None}
 
 # --------------------------------------------------------------------------- #
-# Data                                                                        #
+# Predictions data                                                            #
 # --------------------------------------------------------------------------- #
-TOURNAMENT = {
-    "name": "FIFA World Cup 2026",
-    "hosts": ["United States", "Canada", "Mexico"],
-    "opening_match": "2026-06-11",
-    "final": "2026-07-19",
-    "final_venue": "MetLife Stadium, New Jersey",
-    "teams": 48,
-    "groups": 12,
-    "format": (
-        "First 48-team World Cup. 12 groups of 4 play a round-robin. "
-        "Top 2 in each group plus the 8 best third-placed teams advance to a "
-        "new Round of 32."
-    ),
-    "host_cities": 16,
-}
-
-HIGHLIGHTS = [
-    {
-        "date": "2026-06-11",
-        "title": "Opening night at the Azteca",
-        "detail": (
-            "Mexico kicks off the tournament in Mexico City — the Estadio "
-            "Azteca becomes the first stadium to host matches at three different "
-            "World Cups (1970, 1986, 2026)."
-        ),
-        "tags": ["ceremony", "history"],
-    },
-    {
-        "date": "2025-11-15",
-        "title": "European qualifying wraps",
-        "detail": (
-            "France, England, Spain, Portugal, Germany, Netherlands, Italy and "
-            "Croatia all secure their places, with Norway (Haaland) returning "
-            "to the World Cup for the first time since 1998."
-        ),
-        "tags": ["qualification", "UEFA"],
-    },
-    {
-        "date": "2025-09-10",
-        "title": "CONMEBOL locks in six",
-        "detail": (
-            "Argentina, Brazil, Uruguay, Colombia, Ecuador and Paraguay all "
-            "qualify — the reigning champions look sharp with Messi still "
-            "leading the line."
-        ),
-        "tags": ["qualification", "CONMEBOL"],
-    },
-    {
-        "date": "2025-10-14",
-        "title": "African giants confirmed",
-        "detail": (
-            "Morocco, Senegal, Ivory Coast, Egypt, Nigeria, Ghana, Algeria and "
-            "Cameroon punch their tickets. Cape Verde emerges as a surprise "
-            "first-time qualifier."
-        ),
-        "tags": ["qualification", "CAF"],
-    },
-    {
-        "date": "2026-06-27",
-        "title": "Group stage finale — Round of 32 seeds set",
-        "detail": (
-            "The final matchday completes 72 group matches. FIFA publishes the "
-            "eight best third-placed teams — the most complex tiebreaker "
-            "scenario in World Cup history."
-        ),
-        "tags": ["group stage"],
-    },
-    {
-        "date": "2026-07-19",
-        "title": "Final — MetLife Stadium",
-        "detail": (
-            "The 2026 champion is crowned in New Jersey. First 48-team final "
-            "in history."
-        ),
-        "tags": ["final"],
-    },
-]
-
-# Heuristic power ratings 0-100 based on recent form, squad depth and pedigree.
-# `chance` = rough title-probability estimate (percentage).
 PREDICTIONS = [
-    {"team": "Argentina", "flag": "AR", "rating": 92, "chance": 15.5,
+    {"team": "Argentina", "flag": "\U0001f1e6\U0001f1f7", "rating": 92, "chance": 15.5,
      "reason": "Reigning champions, elite midfield, Messi legacy plus Julian Alvarez peaking."},
-    {"team": "France", "flag": "FR", "rating": 91, "chance": 14.0,
+    {"team": "France", "flag": "\U0001f1eb\U0001f1f7", "rating": 91, "chance": 14.0,
      "reason": "Mbappe at his peak; deepest attacking pool in Europe; finalists in 2018 and 2022."},
-    {"team": "Brazil", "flag": "BR", "rating": 89, "chance": 12.0,
+    {"team": "Brazil", "flag": "\U0001f1e7\U0001f1f7", "rating": 89, "chance": 12.0,
      "reason": "New generation (Vinicius, Rodrygo, Endrick) plus Ancelotti's tactical structure."},
-    {"team": "England", "flag": "EN", "rating": 87, "chance": 10.5,
+    {"team": "England", "flag": "\U0001f3f4\U000e0067\U000e0062\U000e0065\U000e006e\U000e0067\U000e007f", "rating": 87, "chance": 10.5,
      "reason": "Bellingham-Foden-Saka triangle is world-class; keeper depth is the swing factor."},
-    {"team": "Spain", "flag": "ES", "rating": 86, "chance": 9.0,
+    {"team": "Spain", "flag": "\U0001f1ea\U0001f1f8", "rating": 86, "chance": 9.0,
      "reason": "Euro 2024 champions; Yamal and Nico Williams electrify wide play."},
-    {"team": "Portugal", "flag": "PT", "rating": 82, "chance": 6.0,
+    {"team": "Portugal", "flag": "\U0001f1f5\U0001f1f9", "rating": 82, "chance": 6.0,
      "reason": "Ronaldo's swan song, but the engine is now Bruno, Vitinha and Bernardo."},
-    {"team": "Germany", "flag": "DE", "rating": 81, "chance": 5.5,
+    {"team": "Germany", "flag": "\U0001f1e9\U0001f1ea", "rating": 81, "chance": 5.5,
      "reason": "Musiala-Wirtz axis plus Kimmich veteran presence; defense still the question."},
-    {"team": "Netherlands", "flag": "NL", "rating": 80, "chance": 4.5,
+    {"team": "Netherlands", "flag": "\U0001f1f3\U0001f1f1", "rating": 80, "chance": 4.5,
      "reason": "Van Dijk-led defense; Gakpo and Reijnders progression give a balanced side."},
-    {"team": "Morocco", "flag": "MA", "rating": 78, "chance": 3.5,
+    {"team": "Morocco", "flag": "\U0001f1f2\U0001f1e6", "rating": 78, "chance": 3.5,
      "reason": "2022 semifinalists; deepest African squad; defense unmatched at AFCON."},
-    {"team": "Belgium", "flag": "BE", "rating": 76, "chance": 3.0,
+    {"team": "Belgium", "flag": "\U0001f1e7\U0001f1ea", "rating": 76, "chance": 3.0,
      "reason": "Golden generation faded, but De Bruyne and Doku still make them dangerous."},
-    {"team": "Uruguay", "flag": "UY", "rating": 77, "chance": 3.0,
+    {"team": "Uruguay", "flag": "\U0001f1fa\U0001f1fe", "rating": 77, "chance": 3.0,
      "reason": "Bielsa's press plus Nunez/Pellistri front line; Copa America form encouraging."},
-    {"team": "Italy", "flag": "IT", "rating": 75, "chance": 2.5,
+    {"team": "Italy", "flag": "\U0001f1ee\U0001f1f9", "rating": 75, "chance": 2.5,
      "reason": "Returning after two missed cycles; midfield strong, striker crisis unresolved."},
-    {"team": "United States", "flag": "US", "rating": 73, "chance": 2.5,
+    {"team": "United States", "flag": "\U0001f1fa\U0001f1f8", "rating": 73, "chance": 2.5,
      "reason": "Home advantage worth ~5% swing; Pulisic-McKennie-Reyna core in prime."},
-    {"team": "Colombia", "flag": "CO", "rating": 74, "chance": 2.0,
+    {"team": "Colombia", "flag": "\U0001f1e8\U0001f1f4", "rating": 74, "chance": 2.0,
      "reason": "James's renaissance and Luis Diaz make them a knockout-round threat."},
-    {"team": "Croatia", "flag": "HR", "rating": 72, "chance": 2.0,
+    {"team": "Croatia", "flag": "\U0001f1ed\U0001f1f7", "rating": 72, "chance": 2.0,
      "reason": "Modric winding down but tactical maturity keeps them dangerous."},
-    {"team": "Mexico", "flag": "MX", "rating": 70, "chance": 1.5,
+    {"team": "Mexico", "flag": "\U0001f1f2\U0001f1fd", "rating": 70, "chance": 1.5,
      "reason": "Host status, but generational transition still incomplete."},
-    {"team": "Japan", "flag": "JP", "rating": 71, "chance": 1.2,
+    {"team": "Japan", "flag": "\U0001f1ef\U0001f1f5", "rating": 71, "chance": 1.2,
      "reason": "Best Asian side by a distance; Mitoma-Kubo-Kamada trio thrives in Europe."},
-    {"team": "Senegal", "flag": "SN", "rating": 70, "chance": 1.0,
+    {"team": "Senegal", "flag": "\U0001f1f8\U0001f1f3", "rating": 70, "chance": 1.0,
      "reason": "Physicality plus Mendy in goal; needs Sarr/Jackson to click up top."},
-    {"team": "Denmark", "flag": "DK", "rating": 69, "chance": 0.7,
+    {"team": "Denmark", "flag": "\U0001f1e9\U0001f1f0", "rating": 69, "chance": 0.7,
      "reason": "Hjulmand's structure plus Hojlund/Eriksen give them a puncher's chance."},
-    {"team": "Switzerland", "flag": "CH", "rating": 67, "chance": 0.4,
+    {"team": "Switzerland", "flag": "\U0001f1e8\U0001f1ed", "rating": 67, "chance": 0.4,
      "reason": "Reliable knockout-round attendee, but ceiling looks like quarterfinals."},
 ]
 
-TEAMS_CONFIRMED = [
-    {"team": "United States", "confederation": "CONCACAF", "status": "host"},
-    {"team": "Canada",        "confederation": "CONCACAF", "status": "host"},
-    {"team": "Mexico",        "confederation": "CONCACAF", "status": "host"},
-    {"team": "France",       "confederation": "UEFA", "status": "qualified"},
-    {"team": "England",      "confederation": "UEFA", "status": "qualified"},
-    {"team": "Spain",        "confederation": "UEFA", "status": "qualified"},
-    {"team": "Portugal",     "confederation": "UEFA", "status": "qualified"},
-    {"team": "Germany",      "confederation": "UEFA", "status": "qualified"},
-    {"team": "Netherlands",  "confederation": "UEFA", "status": "qualified"},
-    {"team": "Italy",        "confederation": "UEFA", "status": "qualified"},
-    {"team": "Croatia",      "confederation": "UEFA", "status": "qualified"},
-    {"team": "Belgium",      "confederation": "UEFA", "status": "qualified"},
-    {"team": "Denmark",      "confederation": "UEFA", "status": "qualified"},
-    {"team": "Switzerland",  "confederation": "UEFA", "status": "qualified"},
-    {"team": "Norway",       "confederation": "UEFA", "status": "qualified"},
-    {"team": "Argentina",    "confederation": "CONMEBOL", "status": "qualified"},
-    {"team": "Brazil",       "confederation": "CONMEBOL", "status": "qualified"},
-    {"team": "Uruguay",      "confederation": "CONMEBOL", "status": "qualified"},
-    {"team": "Colombia",     "confederation": "CONMEBOL", "status": "qualified"},
-    {"team": "Ecuador",      "confederation": "CONMEBOL", "status": "qualified"},
-    {"team": "Paraguay",     "confederation": "CONMEBOL", "status": "qualified"},
-    {"team": "Morocco",      "confederation": "CAF", "status": "qualified"},
-    {"team": "Senegal",      "confederation": "CAF", "status": "qualified"},
-    {"team": "Ivory Coast",  "confederation": "CAF", "status": "qualified"},
-    {"team": "Egypt",        "confederation": "CAF", "status": "qualified"},
-    {"team": "Nigeria",      "confederation": "CAF", "status": "qualified"},
-    {"team": "Ghana",        "confederation": "CAF", "status": "qualified"},
-    {"team": "Japan",        "confederation": "AFC", "status": "qualified"},
-    {"team": "South Korea",  "confederation": "AFC", "status": "qualified"},
-    {"team": "Iran",         "confederation": "AFC", "status": "qualified"},
-    {"team": "Australia",    "confederation": "AFC", "status": "qualified"},
-    {"team": "Saudi Arabia", "confederation": "AFC", "status": "qualified"},
-]
+
+# --------------------------------------------------------------------------- #
+# Helpers — fetch from API-Football                                           #
+# --------------------------------------------------------------------------- #
+def _api_get(endpoint: str, params: dict[str, str] | None = None) -> dict:
+    """Make a GET request to API-Football."""
+    if not API_FOOTBALL_KEY:
+        return {"response": []}
+    qs = "&".join(f"{k}={v}" for k, v in (params or {}).items())
+    url = f"{API_BASE}{endpoint}" + (f"?{qs}" if qs else "")
+    req = urllib.request.Request(url, headers={"x-apisports-key": API_FOOTBALL_KEY})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+
+def fetch_fixtures() -> list[dict]:
+    """Fetch World Cup 2026 fixtures (all dates)."""
+    data = _api_get("/fixtures", {
+        "league": str(WORLD_CUP_LEAGUE_ID),
+        "season": str(WORLD_CUP_SEASON),
+    })
+    fixtures = []
+    for item in data.get("response", []):
+        fixture = item.get("fixture", {})
+        teams = item.get("teams", {})
+        goals = item.get("goals", {})
+        league = item.get("league", {})
+        fixtures.append({
+            "id": fixture.get("id"),
+            "date": fixture.get("date", ""),
+            "status": fixture.get("status", {}).get("short", "TBD"),
+            "status_long": fixture.get("status", {}).get("long", ""),
+            "venue": fixture.get("venue", {}).get("name", ""),
+            "city": fixture.get("venue", {}).get("city", ""),
+            "round": league.get("round", ""),
+            "home": {
+                "name": teams.get("home", {}).get("name", "TBD"),
+                "logo": teams.get("home", {}).get("logo", ""),
+            },
+            "away": {
+                "name": teams.get("away", {}).get("name", "TBD"),
+                "logo": teams.get("away", {}).get("logo", ""),
+            },
+            "score_home": goals.get("home"),
+            "score_away": goals.get("away"),
+        })
+    fixtures.sort(key=lambda f: f["date"])
+    return fixtures
 
 
 # --------------------------------------------------------------------------- #
-# API routes                                                                  #
+# Cron endpoint — called hourly by Vercel Cron                                #
+# --------------------------------------------------------------------------- #
+@app.get("/api/cron")
+def cron(request: Request):
+    """Vercel Cron handler: refresh fixtures cache."""
+    # Vercel sends CRON_SECRET in authorization header on Hobby plan
+    # but we'll accept all calls for simplicity
+    fixtures = fetch_fixtures()
+    _cache["fixtures"] = fixtures
+    _cache["last_updated"] = datetime.now(timezone.utc).isoformat()
+    return {
+        "ok": True,
+        "fetched": len(fixtures),
+        "last_updated": _cache["last_updated"],
+    }
+
+
+# --------------------------------------------------------------------------- #
+# API endpoints                                                               #
 # --------------------------------------------------------------------------- #
 @app.get("/api")
 def api_root():
     days = (date(2026, 6, 11) - date.today()).days
     return {
         "name": "World Cup 2026 Tracker",
-        "version": "1.0.0",
-        "days_until_kickoff": days,
-        "endpoints": [
-            "/api/health",
-            "/api/tournament",
-            "/api/highlights",
-            "/api/predictions",
-            "/api/predictions/top?limit=5",
-            "/api/teams",
-        ],
+        "version": "2.0.0",
+        "days_until_kickoff": max(days, 0),
+        "endpoints": ["/api/health", "/api/fixtures", "/api/predictions", "/api/cron"],
     }
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "last_updated": _cache.get("last_updated")}
 
 
-@app.get("/api/tournament")
-def tournament():
-    days = (date(2026, 6, 11) - date.today()).days
-    return {**TOURNAMENT, "days_until_kickoff": days}
-
-
-@app.get("/api/highlights")
-def highlights():
-    return {"count": len(HIGHLIGHTS), "items": HIGHLIGHTS}
+@app.get("/api/fixtures")
+def fixtures_endpoint():
+    return {"count": len(_cache["fixtures"]), "last_updated": _cache["last_updated"], "items": _cache["fixtures"]}
 
 
 @app.get("/api/predictions")
-def predictions():
+def predictions_endpoint():
     ranked = sorted(PREDICTIONS, key=lambda p: p["chance"], reverse=True)
     return {"count": len(ranked), "items": ranked}
 
 
-@app.get("/api/predictions/top")
-def predictions_top(limit: int = Query(5, ge=1, le=20)):
-    ranked = sorted(PREDICTIONS, key=lambda p: p["chance"], reverse=True)[:limit]
-    return {"count": len(ranked), "items": ranked}
-
-
-@app.get("/api/teams")
-def teams():
-    by_conf: dict[str, list] = {}
-    for t in TEAMS_CONFIRMED:
-        by_conf.setdefault(t["confederation"], []).append(t)
-    return {"count": len(TEAMS_CONFIRMED), "by_confederation": by_conf}
-
-
 # --------------------------------------------------------------------------- #
-# HTML dashboard                                                              #
+# HTML Dashboard                                                              #
 # --------------------------------------------------------------------------- #
-def render_dashboard() -> str:
-    days = (date(2026, 6, 11) - date.today()).days
-    top5 = sorted(PREDICTIONS, key=lambda p: p["chance"], reverse=True)[:5]
+def _render_fixtures_html(fixtures: list[dict]) -> str:
+    if not fixtures:
+        return """
+        <div class="empty-state">
+          <p class="empty-icon">&#9917;</p>
+          <h3>No fixture data yet</h3>
+          <p>The cron job fetches scores hourly from API-Football once the tournament schedule is published.<br>
+          If you just deployed, trigger a manual refresh at <a href="/api/cron">/api/cron</a>.</p>
+          <p class="hint">Make sure the <code>API_FOOTBALL_KEY</code> environment variable is set in Vercel.</p>
+        </div>"""
 
-    highlight_cards = "".join(
-        f"""
-        <article class="card">
-          <div class="card-date">{h['date']}</div>
-          <h3>{h['title']}</h3>
-          <p>{h['detail']}</p>
-          <div class="tags">{''.join(f'<span class="tag">{t}</span>' for t in h['tags'])}</div>
-        </article>
-        """
-        for h in HIGHLIGHTS
-    )
+    # Group by round
+    rounds: dict[str, list] = {}
+    for f in fixtures:
+        r = f.get("round") or "Scheduled"
+        rounds.setdefault(r, []).append(f)
 
-    max_chance = max(p["chance"] for p in top5)
-    prediction_rows = "".join(
-        f"""
+    html = ""
+    for rnd, matches in rounds.items():
+        html += f'<h3 class="round-header">{rnd}</h3><div class="matches">'
+        for m in matches:
+            dt = m["date"][:16].replace("T", " ") if m["date"] else "TBD"
+            sh = m["score_home"]
+            sa = m["score_away"]
+            score_display = f'{sh} - {sa}' if sh is not None else "vs"
+            status_class = "live" if m["status"] in ("1H", "2H", "HT", "ET", "P", "LIVE") else (
+                "ft" if m["status"] in ("FT", "AET", "PEN") else "")
+            status_label = m["status_long"] or m["status"]
+            html += f'''
+            <div class="match-card {status_class}">
+              <div class="match-time">{dt} <span class="status-badge {status_class}">{status_label}</span></div>
+              <div class="match-teams">
+                <div class="team home">
+                  {'<img src="'+m["home"]["logo"]+'" class="team-logo"/>' if m["home"]["logo"] else ''}
+                  <span>{m["home"]["name"]}</span>
+                </div>
+                <div class="score">{score_display}</div>
+                <div class="team away">
+                  <span>{m["away"]["name"]}</span>
+                  {'<img src="'+m["away"]["logo"]+'" class="team-logo"/>' if m["away"]["logo"] else ''}
+                </div>
+              </div>
+              <div class="match-venue">{m["venue"]}{", " + m["city"] if m["city"] else ""}</div>
+            </div>'''
+        html += '</div>'
+    return html
+
+
+def _render_predictions_html() -> str:
+    ranked = sorted(PREDICTIONS, key=lambda p: p["chance"], reverse=True)
+    max_chance = ranked[0]["chance"]
+    rows = ""
+    for i, p in enumerate(ranked):
+        bar_w = (p["chance"] / max_chance) * 100
+        rows += f'''
         <tr>
           <td class="rank">{i+1}</td>
-          <td class="team">{p['team']} <span class="cc">({p['flag']})</span></td>
+          <td class="team-cell"><span class="flag">{p["flag"]}</span> {p["team"]}</td>
+          <td class="rating">{p["rating"]}</td>
           <td>
             <div class="bar-wrap">
-              <div class="bar" style="width:{(p['chance']/max_chance)*100:.0f}%"></div>
-              <span class="bar-label">{p['chance']:.1f}%</span>
+              <div class="bar" style="width:{bar_w:.0f}%"></div>
+              <span class="bar-label">{p["chance"]:.1f}%</span>
             </div>
           </td>
-          <td class="reason">{p['reason']}</td>
-        </tr>
-        """
-        for i, p in enumerate(top5)
-    )
+          <td class="reason">{p["reason"]}</td>
+        </tr>'''
+    return f'''
+    <table class="pred-table">
+      <thead><tr><th>#</th><th>Team</th><th>Rating</th><th>Title chance</th><th>Analysis</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>'''
 
-    return f"""<!doctype html>
+
+def render_dashboard() -> str:
+    days = (date(2026, 6, 11) - date.today()).days
+    last_upd = _cache.get("last_updated") or "never"
+    fixtures_html = _render_fixtures_html(_cache["fixtures"])
+    predictions_html = _render_predictions_html()
+
+    return f'''<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
@@ -293,97 +269,124 @@ def render_dashboard() -> str:
   <title>World Cup 2026 Tracker</title>
   <style>
     :root {{
-      --bg1:#0b1220; --bg2:#0f2a24; --card:#131b2e; --line:#1f2a44;
-      --text:#e6edf6; --muted:#94a3b8; --accent:#22d3ee; --accent2:#34d399;
-      --gold:#fbbf24;
+      --bg1:#0b1220;--bg2:#0f2a24;--card:#131b2e;--line:#1f2a44;
+      --text:#e6edf6;--muted:#94a3b8;--accent:#22d3ee;--accent2:#34d399;
+      --gold:#fbbf24;--live:#ef4444;
     }}
     *{{box-sizing:border-box}}
     html,body{{margin:0;padding:0;background:linear-gradient(160deg,var(--bg1),var(--bg2));color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh}}
-    .wrap{{max-width:1080px;margin:0 auto;padding:32px 24px 80px}}
-    header{{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:32px}}
-    .brand{{display:flex;align-items:center;gap:14px}}
-    .badge{{width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;font-size:26px}}
-    h1{{margin:0;font-size:22px;letter-spacing:-.01em}}
-    .sub{{color:var(--muted);font-size:13px}}
-    .chips{{display:flex;gap:8px;flex-wrap:wrap}}
-    .chip{{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--text);padding:6px 12px;border-radius:999px;font-size:12px}}
-    .countdown{{background:linear-gradient(135deg,#fbbf24,#f97316);color:#1a0f00;padding:6px 14px;border-radius:999px;font-weight:700;font-size:12px}}
-    h2{{margin:32px 0 12px;font-size:16px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}}
-    .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}}
-    .card{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;transition:transform .12s ease,border-color .12s ease}}
-    .card:hover{{transform:translateY(-2px);border-color:var(--accent)}}
-    .card-date{{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}}
-    .card h3{{margin:0 0 6px;font-size:15px}}
-    .card p{{margin:0 0 10px;color:#cbd5e1;font-size:13px;line-height:1.5}}
-    .tags{{display:flex;flex-wrap:wrap;gap:4px}}
-    .tag{{font-size:10px;color:var(--accent);background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.25);padding:2px 8px;border-radius:6px}}
-    table{{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}}
-    th,td{{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line);font-size:13px;vertical-align:middle}}
-    th{{background:rgba(255,255,255,.03);font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}}
-    tr:last-child td{{border-bottom:none}}
-    .rank{{font-weight:700;color:var(--gold);width:36px}}
-    .team{{font-weight:600;white-space:nowrap}}
-    .cc{{color:var(--muted);font-weight:400;font-size:11px}}
-    .bar-wrap{{position:relative;background:rgba(255,255,255,.05);border-radius:6px;height:22px;overflow:hidden;min-width:140px}}
+    .wrap{{max-width:1120px;margin:0 auto;padding:28px 20px 60px}}
+    header{{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:28px}}
+    .brand{{display:flex;align-items:center;gap:12px}}
+    .badge{{width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;font-size:22px;font-weight:700;color:#0b1220}}
+    h1{{margin:0;font-size:20px;letter-spacing:-.01em}}
+    .sub{{color:var(--muted);font-size:12px}}
+    .chips{{display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
+    .chip{{background:rgba(255,255,255,.05);border:1px solid var(--line);padding:5px 11px;border-radius:999px;font-size:11px}}
+    .countdown{{background:linear-gradient(135deg,#fbbf24,#f97316);color:#1a0f00;padding:5px 12px;border-radius:999px;font-weight:700;font-size:11px}}
+
+    /* Tabs */
+    .tabs{{display:flex;gap:4px;margin-bottom:20px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:12px;padding:4px;width:fit-content}}
+    .tab{{padding:8px 18px;border-radius:9px;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;color:var(--muted);border:none;background:none}}
+    .tab.active{{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0b1220;font-weight:600;box-shadow:0 2px 8px rgba(34,211,238,.25)}}
+    .tab:hover:not(.active){{color:var(--text)}}
+    .tab-panel{{display:none}}
+    .tab-panel.active{{display:block}}
+
+    /* Fixtures */
+    .round-header{{margin:20px 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent2)}}
+    .matches{{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px}}
+    .match-card{{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;transition:border-color .12s}}
+    .match-card:hover{{border-color:var(--accent)}}
+    .match-card.live{{border-color:var(--live);box-shadow:0 0 12px rgba(239,68,68,.15)}}
+    .match-card.ft{{opacity:.85}}
+    .match-time{{font-size:11px;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:8px}}
+    .status-badge{{padding:2px 7px;border-radius:5px;font-size:10px;font-weight:600;text-transform:uppercase}}
+    .status-badge.live{{background:var(--live);color:#fff}}
+    .status-badge.ft{{background:rgba(255,255,255,.1);color:var(--muted)}}
+    .match-teams{{display:flex;align-items:center;justify-content:space-between;gap:8px}}
+    .team{{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;flex:1}}
+    .team.away{{justify-content:flex-end;text-align:right}}
+    .team-logo{{width:20px;height:20px;border-radius:2px}}
+    .score{{font-size:18px;font-weight:700;min-width:50px;text-align:center;color:var(--accent)}}
+    .match-venue{{font-size:11px;color:var(--muted);margin-top:6px}}
+
+    /* Empty state */
+    .empty-state{{text-align:center;padding:48px 20px;color:var(--muted)}}
+    .empty-state .empty-icon{{font-size:48px;margin-bottom:8px}}
+    .empty-state h3{{color:var(--text);margin:0 0 8px}}
+    .empty-state p{{margin:4px 0;font-size:13px}}
+    .empty-state .hint{{margin-top:14px;font-size:11px;color:var(--muted)}}
+    .empty-state code{{background:rgba(255,255,255,.08);padding:2px 6px;border-radius:4px;font-size:11px}}
+
+    /* Predictions */
+    .pred-table{{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}}
+    .pred-table th,.pred-table td{{padding:11px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:12px;vertical-align:middle}}
+    .pred-table thead th{{background:rgba(255,255,255,.03);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}}
+    .pred-table tr:last-child td{{border-bottom:none}}
+    .rank{{font-weight:700;color:var(--gold);width:30px}}
+    .team-cell{{font-weight:600;white-space:nowrap}}
+    .flag{{font-size:16px;margin-right:4px}}
+    .rating{{color:var(--accent2);font-weight:600;width:50px}}
+    .bar-wrap{{position:relative;background:rgba(255,255,255,.05);border-radius:6px;height:20px;overflow:hidden;min-width:120px}}
     .bar{{background:linear-gradient(90deg,var(--accent2),var(--accent));height:100%}}
-    .bar-label{{position:absolute;inset:0;display:grid;place-items:center;font-size:11px;font-weight:700}}
-    .reason{{color:#94a3b8;font-size:12px;max-width:380px}}
-    .api-box{{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#cbd5e1}}
-    .api-box a{{color:var(--accent);text-decoration:none;display:block;padding:4px 0}}
-    .api-box a:hover{{color:var(--accent2)}}
-    footer{{margin-top:36px;color:var(--muted);font-size:11px;text-align:center}}
+    .bar-label{{position:absolute;inset:0;display:grid;place-items:center;font-size:10px;font-weight:700}}
+    .reason{{color:#94a3b8;font-size:11px;max-width:340px}}
+
+    .update-note{{font-size:11px;color:var(--muted);margin-top:16px}}
+    footer{{margin-top:32px;text-align:center;font-size:11px;color:var(--muted)}}
+    footer a{{color:var(--accent);text-decoration:none}}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <div class="brand">
-        <div class="badge">WC</div>
-        <div>
-          <h1>FIFA World Cup 2026 Tracker</h1>
-          <div class="sub">USA · Canada · Mexico  ·  June 11 – July 19, 2026</div>
-        </div>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="badge">WC</div>
+      <div>
+        <h1>FIFA World Cup 2026 Tracker</h1>
+        <div class="sub">USA &middot; Canada &middot; Mexico &middot; June 11 – July 19, 2026</div>
       </div>
-      <div class="chips">
-        <span class="countdown">{days} days to kickoff</span>
-        <span class="chip">48 teams</span>
-        <span class="chip">12 groups</span>
-        <span class="chip">16 host cities</span>
-      </div>
-    </header>
-
-    <h2>Highlights &amp; Storylines</h2>
-    <div class="grid">
-      {highlight_cards}
     </div>
-
-    <h2>Top 5 Title Predictions</h2>
-    <table>
-      <thead>
-        <tr><th>#</th><th>Team</th><th>Title chance</th><th>Why</th></tr>
-      </thead>
-      <tbody>
-        {prediction_rows}
-      </tbody>
-    </table>
-
-    <h2>API Endpoints</h2>
-    <div class="api-box">
-      <a href="/api">/api</a>
-      <a href="/api/tournament">/api/tournament</a>
-      <a href="/api/highlights">/api/highlights</a>
-      <a href="/api/predictions">/api/predictions</a>
-      <a href="/api/predictions/top?limit=5">/api/predictions/top?limit=5</a>
-      <a href="/api/teams">/api/teams</a>
+    <div class="chips">
+      <span class="countdown">{"&#9917; LIVE" if days <= 0 else f"{days} days to kickoff"}</span>
+      <span class="chip">48 teams</span>
+      <span class="chip">Updated hourly</span>
     </div>
+  </header>
 
-    <footer>Predictions are heuristic ratings for entertainment. Qualification list will evolve.</footer>
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('scores')">Scores &amp; Schedule</button>
+    <button class="tab" onclick="switchTab('predictions')">Predictions</button>
   </div>
+
+  <div id="tab-scores" class="tab-panel active">
+    {fixtures_html}
+    <p class="update-note">Last refreshed: {last_upd} &middot; Cron runs every hour</p>
+  </div>
+
+  <div id="tab-predictions" class="tab-panel">
+    <p style="color:var(--muted);font-size:12px;margin-bottom:14px;">Heuristic power ratings (0-100) and title-probability estimates based on squad depth, recent form, and pedigree.</p>
+    {predictions_html}
+  </div>
+
+  <footer>
+    <a href="/api">/api</a> &middot; <a href="/api/fixtures">/api/fixtures</a> &middot; <a href="/api/predictions">/api/predictions</a> &middot; <a href="/api/cron">/api/cron</a>
+    <br>Powered by API-Football &middot; Predictions for entertainment only
+  </footer>
+</div>
+<script>
+function switchTab(id) {{
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  event.target.classList.add('active');
+}}
+</script>
 </body>
-</html>"""
+</html>'''
 
 
 @app.get("/", response_class=HTMLResponse)
-@app.get("/api/dashboard", response_class=HTMLResponse)
 def dashboard():
     return HTMLResponse(render_dashboard())

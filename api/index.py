@@ -131,13 +131,23 @@ def fetch_fixtures() -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
-# Cron endpoint — called hourly by Vercel Cron                                #
+# Cron endpoint — called daily by Vercel Cron (7am Beijing / 23:00 UTC)                                #
 # --------------------------------------------------------------------------- #
+TOURNAMENT_END = date(2026, 7, 20)  # day after the final
+
+
 @app.get("/api/cron")
 def cron(request: Request):
-    """Vercel Cron handler: refresh fixtures cache."""
-    # Vercel sends CRON_SECRET in authorization header on Hobby plan
-    # but we'll accept all calls for simplicity
+    """Vercel Cron handler: refresh fixtures cache daily at 7am Beijing time.
+    Automatically stops fetching once the tournament is over (after July 19, 2026)."""
+    today = date.today()
+    if today > TOURNAMENT_END:
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": "Tournament ended on 2026-07-19. Cron is inactive.",
+            "last_updated": _cache.get("last_updated"),
+        }
     fixtures = fetch_fixtures()
     _cache["fixtures"] = fixtures
     _cache["last_updated"] = datetime.now(timezone.utc).isoformat()

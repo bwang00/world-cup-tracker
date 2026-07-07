@@ -32,7 +32,7 @@ WORLD_CUP_SEASON = 2026
 # Vercel doesn't have persistent filesystem in production, so we keep a
 # lightweight in-memory cache that gets populated on cron runs (and survives
 # within a single function instance's warm lifetime).
-_cache: dict[str, Any] = {"fixtures": [], "last_updated": None}
+_cache: dict[str, Any] = {"fixtures": [], "last_updated": None, "season_label": ""}
 
 # --------------------------------------------------------------------------- #
 # Predictions data                                                            #
@@ -95,12 +95,20 @@ def _api_get(endpoint: str, params: dict[str, str] | None = None) -> dict:
         return json.loads(resp.read())
 
 
-def fetch_fixtures() -> list[dict]:
-    """Fetch World Cup 2026 fixtures (all dates)."""
+def fetch_fixtures() -> tuple[list[dict], str]:
+    """Fetch World Cup 2026 fixtures. Falls back to 2022 if 2026 has no data yet."""
     data = _api_get("/fixtures", {
         "league": str(WORLD_CUP_LEAGUE_ID),
         "season": str(WORLD_CUP_SEASON),
     })
+    season_label = "2026"
+    # If 2026 has no fixtures yet, fall back to 2022 as reference data
+    if not data.get("response"):
+        data = _api_get("/fixtures", {
+            "league": str(WORLD_CUP_LEAGUE_ID),
+            "season": "2022",
+        })
+        season_label = "2022 (reference — 2026 schedule not yet published)"
     fixtures = []
     for item in data.get("response", []):
         fixture = item.get("fixture", {})
@@ -127,7 +135,7 @@ def fetch_fixtures() -> list[dict]:
             "score_away": goals.get("away"),
         })
     fixtures.sort(key=lambda f: f["date"])
-    return fixtures
+    return fixtures, season_label
 
 
 # --------------------------------------------------------------------------- #
@@ -148,12 +156,14 @@ def cron(request: Request):
             "reason": "Tournament ended on 2026-07-19. Cron is inactive.",
             "last_updated": _cache.get("last_updated"),
         }
-    fixtures = fetch_fixtures()
+    fixtures, season_label = fetch_fixtures()
     _cache["fixtures"] = fixtures
+    _cache["season_label"] = season_label
     _cache["last_updated"] = datetime.now(timezone.utc).isoformat()
     return {
         "ok": True,
         "fetched": len(fixtures),
+        "season": season_label,
         "last_updated": _cache["last_updated"],
     }
 
@@ -268,6 +278,7 @@ def _render_predictions_html() -> str:
 def render_dashboard() -> str:
     days = (date(2026, 6, 11) - date.today()).days
     last_upd = _cache.get("last_updated") or "never"
+    season_label = _cache.get("season_label") or "no data yet"
     fixtures_html = _render_fixtures_html(_cache["fixtures"])
     predictions_html = _render_predictions_html()
 
@@ -361,7 +372,7 @@ def render_dashboard() -> str:
     <div class="chips">
       <span class="countdown">{"&#9917; LIVE" if days <= 0 else f"{days} days to kickoff"}</span>
       <span class="chip">48 teams</span>
-      <span class="chip">Updated hourly</span>
+      <span class="chip">Updated daily 7am Beijing</span>
     </div>
   </header>
 
@@ -372,7 +383,7 @@ def render_dashboard() -> str:
 
   <div id="tab-scores" class="tab-panel active">
     {fixtures_html}
-    <p class="update-note">Last refreshed: {last_upd} &middot; Cron runs every hour</p>
+    <p class="update-note">Season: {season_label} &middot; Last refreshed: {last_upd} &middot; Cron: daily 7am Beijing</p>
   </div>
 
   <div id="tab-predictions" class="tab-panel">
@@ -399,4 +410,13 @@ function switchTab(id) {{
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard():
+    # Lazy-load: if cache is empty (cold start), fetch fixtures now
+    if not _cache["fixtures"] and API_FOOTBALL_KEY:
+        try:
+            fixtures, season_label = fetch_fixtures()
+            _cache["fixtures"] = fixtures
+            _cache["season_label"] = season_label
+            _cache["last_updated"] = datetime.now(timezone.utc).isoformat()
+        except Exception:
+            pass
     return HTMLResponse(render_dashboard())

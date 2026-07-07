@@ -27,3 +27,6 @@ uvicorn api.index:app --reload
 ```
 vercel deploy --prod --yes
 ```
+
+## License
+MIT

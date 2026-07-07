@@ -93,6 +93,87 @@ PREDICTIONS = [
 ]
 
 
+
+
+# --------------------------------------------------------------------------- #
+# Matchup analyses — keyed by match ID from worldcup26.ir                     #
+# --------------------------------------------------------------------------- #
+MATCHUP_ANALYSIS = {
+    # Round of 32
+    "73": {"headline": "South Africa 0-1 Canada", "verdict": "Late drama in Toronto",
+           "story": "A tense affair decided in stoppage time. Canada advanced thanks to Avstakviv's 90+2' header. South Africa were the better side for long stretches but couldn't convert."},
+    "74": {"headline": "Germany 1-1 Paraguay (Paraguay adv. on pens)", "verdict": "Historic Paraguay upset",
+           "story": "Germany dominated possession but couldn't break down a resolute Paraguay defense. After a 1-1 draw, Paraguay held their nerve in the shootout — another chapter in Germany's tournament woes."},
+    "75": {"headline": "Netherlands 1-1 Morocco (Morocco adv.)", "verdict": "Morocco again haunts the Dutch",
+           "story": "A rematch of the 2022 QF energy. Morocco's defensive discipline nullified Gakpo and Reijnders. Van Dijk's generation faces another cruel exit."},
+    "76": {"headline": "Brazil 2-1 Japan", "verdict": "Vinicius wins it late",
+           "story": "Japan pushed Brazil hard, leading briefly, but Vinicius struck twice in the final 20 minutes. A warning sign that Brazil looked vulnerable — a warning that would prove prophetic in R16."},
+    "77": {"headline": "France 3-0 Sweden", "verdict": "Statement win for Les Bleus",
+           "story": "Mbappe scored twice in the first half; Kolo Muani added a third. France look like the team to beat — clinical, ruthless, and defensively airtight."},
+    "78": {"headline": "Ivory Coast 1-2 Norway", "verdict": "Haaland delivers",
+           "story": "Haaland's brace announced Norway's arrival as a genuine contender. Ivory Coast's spirited fightback fell short. This was the moment the dark horses became real."},
+    "79": {"headline": "Mexico 2-0 Ecuador", "verdict": "Host nation rolls on",
+           "story": "Home advantage at Estadio Azteca proved decisive. Two well-taken goals sent Mexico into R16 amid roaring support. Sadly for El Tri, the next test would be England."},
+    "80": {"headline": "England 2-1 DR Congo", "verdict": "Nervy but effective",
+           "story": "DR Congo made life difficult, equalizing briefly, but Bellingham's brilliance settled it. England's attack is firing; the defense less convincing."},
+    "81": {"headline": "United States 2-0 Bosnia and Herzegovina", "verdict": "Home crowd roars",
+           "story": "Pulisic scored and assisted in a comfortable win. USA looked every bit the confident home team — before Belgium exposed the defensive frailty in R16."},
+    "82": {"headline": "Belgium 3-2 Senegal", "verdict": "De Bruyne magic",
+           "story": "A see-saw thriller. Senegal twice equalized before De Bruyne's late free-kick winner. Belgium's Golden Generation looking rejuvenated."},
+    "83": {"headline": "Portugal 2-1 Croatia", "verdict": "Ronaldo advances one more time",
+           "story": "Bruno Fernandes with the winner. Croatia's Modric era ends with dignity but ultimately in disappointment."},
+    "84": {"headline": "Spain 3-0 Austria", "verdict": "La Roja untouchable",
+           "story": "Yamal ran the show. Austria never got a foothold. Spain haven't conceded in the knockouts — a genuine championship trait."},
+    "85": {"headline": "Switzerland 2-0 Algeria", "verdict": "Solid and unfussy",
+           "story": "Xhaka pulled the strings; Embolo scored. Switzerland do what Switzerland do — advance without fanfare."},
+    "86": {"headline": "Argentina 3-2 Cape Verde", "verdict": "Champions wobble",
+           "story": "The debutants gave Argentina a real scare. Messi provided a moment of magic, but the defense looked shaky. Warning signs for the reigning champions."},
+    "87": {"headline": "Colombia 1-0 Ghana", "verdict": "Luis Diaz decisive",
+           "story": "A cagey affair settled by Diaz's second-half strike. Colombia looked defensively organized and dangerous on the break."},
+    "88": {"headline": "Australia 1-1 Egypt (Egypt adv. on away goals equiv.)", "verdict": "Egypt's fairy tale continues",
+           "story": "Salah delivered when it mattered. Australia's brave campaign ends but Egypt march on to face Argentina — one of the biggest R16 upsets brewing."},
+
+    # Round of 16
+    "89": {"headline": "Paraguay 0-1 France", "verdict": "France grind out the win",
+           "story": "Paraguay set up defensively and made France work for every yard. Mbappe eventually broke through with a curling strike after 67 minutes. Efficient, if not spectacular."},
+    "90": {"headline": "Canada 0-3 Morocco", "verdict": "Morocco masterclass",
+           "story": "Hakimi from the back, Ounahi in midfield, En-Nesyri up top — Morocco dismantled Canada. The 2022 semifinalists look every bit as dangerous this time."},
+    "91": {"headline": "Brazil 1-2 Norway", "verdict": "The upset of the tournament",
+           "story": "Haaland scored twice, Brazil looked lost. Endrick missed a sitter that would have leveled it. A seismic result — Selecao out at R16, Norway into the QF."},
+    "92": {"headline": "Mexico 2-3 England", "verdict": "Heartbreak in Los Angeles",
+           "story": "Mexico led 2-1 with 15 minutes left. Then Foden equalized and Kane won it in the 89th. Home dreams shattered; England march on."},
+    "93": {"headline": "Portugal 0-1 Spain", "verdict": "Iberian derby to La Roja",
+           "story": "Yamal terrorized the Portuguese defense all night. Morata scored the only goal. Ronaldo's swan song ends without a goal in the knockouts."},
+    "94": {"headline": "United States 1-4 Belgium", "verdict": "Home nightmare",
+           "story": "De Bruyne ran the game. Doku scored a stunner. Lukaku got a brace. USA looked overrun from the first whistle — the home advantage evaporated in Atlanta."},
+    "95": {"headline": "Argentina vs Egypt (today)", "verdict": "Reigning champions in danger?",
+           "story": "Argentina looked shaky vs Cape Verde. Egypt have Salah in form and belief. If Messi doesn't sparkle, this could be the shock of shocks."},
+    "96": {"headline": "Switzerland vs Colombia (today)", "verdict": "Pragmatism vs flair",
+           "story": "Switzerland's defensive structure vs Colombia's counter-attacking threat. James Rodriguez's set-pieces could be decisive. Winner faces the Argentina/Egypt survivor."},
+
+    # Quarterfinals
+    "97": {"headline": "France vs Morocco", "verdict": "Rematch of the 2022 SF",
+           "story": "Redemption or repeat? France won 2-0 in Qatar. Morocco are better this time — deeper squad, older core, harder to break down. The tie of the round."},
+    "98": {"headline": "Spain vs Belgium", "verdict": "Yamal vs De Bruyne",
+           "story": "Two teams playing their best football. Spain haven't conceded; Belgium have scored 7 in two knockout games. Something has to give."},
+    "99": {"headline": "Norway vs England", "verdict": "Haaland's Premier League reunion",
+           "story": "Haaland vs the England back line he tormentds every week. England's midfield superiority against Norway's transition game. Should be a classic."},
+    "100": {"headline": "Match 95 winner vs Match 96 winner", "verdict": "Wide open bracket half",
+           "story": "The most unpredictable QF slot. Argentina, Egypt, Switzerland, or Colombia — any of them could reach the semis via this route."},
+
+    # Semifinals
+    "101": {"headline": "Match 97 winner vs Match 98 winner", "verdict": "European heavyweight clash likely",
+           "story": "Whoever emerges here will be firm favorites for the final. France/Spain/Belgium/Morocco quartet — a mini-Euros within the World Cup."},
+    "102": {"headline": "Match 99 winner vs Match 100 winner", "verdict": "The wide-open half",
+           "story": "England or Norway meet whoever survives the Argentina/Egypt/Switzerland/Colombia gauntlet. A less star-studded but wildly unpredictable path to the final."},
+
+    # Third place & Final
+    "103": {"headline": "Loser SF1 vs Loser SF2", "verdict": "Consolation match",
+           "story": "The third-place playoff — often a strange, open, high-scoring game once the pressure of a final is off."},
+    "104": {"headline": "The 2026 World Cup Final", "verdict": "MetLife Stadium, July 19",
+           "story": "The 48-team era ends here. Whoever lifts the trophy will have beaten teams from every confederation en route. History awaits."},
+}
+
 # --------------------------------------------------------------------------- #
 # Data fetching                                                               #
 # --------------------------------------------------------------------------- #
@@ -303,11 +384,25 @@ def _render_bracket(games: list[dict]) -> str:
                 hs = ""
                 aws = ""
 
+            match_id = g.get("id", "")
+            analysis = MATCHUP_ANALYSIS.get(match_id, {})
+            headline = analysis.get("headline", f"{home} vs {away}")
+            verdict = analysis.get("verdict", "Analysis coming soon")
+            story = analysis.get("story", "Detailed breakdown will be added as the match approaches.")
+            # Escape single quotes and newlines for safe HTML attribute embedding
+            def _esc(s):
+                return (s or "").replace("&", "&amp;").replace('"', "&quot;").replace("'", "&#39;")
             html += f'''
-            <div class="bracket-match {state}">
+            <div class="bracket-match {state}" onclick="showAnalysis(this)"
+                 data-headline="{_esc(headline)}"
+                 data-verdict="{_esc(verdict)}"
+                 data-story="{_esc(story)}"
+                 data-time="{_esc(bjt)}"
+                 data-round="{_esc(label)}"
+                 data-match-id="M{match_id}">
               <div class="bm-row {'winner' if home_win else ''}"><span class="bm-team">{home}</span><span class="bm-score">{hs}</span></div>
               <div class="bm-row {'winner' if away_win else ''}"><span class="bm-team">{away}</span><span class="bm-score">{aws}</span></div>
-              <div class="bm-time">{bjt}</div>
+              <div class="bm-time">{bjt} <span class="bm-info">&#9432;</span></div>
             </div>'''
 
         html += '</div></div>'
@@ -405,13 +500,31 @@ def render_dashboard() -> str:
     .bracket-round-title{{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent2);margin:0 0 10px;white-space:nowrap}}
     .match-count{{color:var(--muted);font-weight:400;font-size:10px}}
     .bracket-matches{{display:flex;flex-direction:column;gap:6px}}
-    .bracket-match{{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px}}
+    .bracket-match{{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;cursor:pointer;transition:transform .12s,border-color .12s,box-shadow .12s}}
+    .bracket-match:hover{{border-color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 12px rgba(34,211,238,.15)}}
     .bracket-match.live{{border-color:var(--live);box-shadow:0 0 8px rgba(239,68,68,.1)}}
     .bracket-match.upcoming{{opacity:.7}}
     .bm-row{{display:flex;justify-content:space-between;padding:2px 0}}
     .bm-row.winner{{color:var(--accent2);font-weight:600}}
     .bm-team{{flex:1}}.bm-score{{font-weight:700;min-width:20px;text-align:right}}
-    .bm-time{{font-size:9px;color:var(--muted);margin-top:3px;padding-top:3px;border-top:1px solid var(--line)}}
+    .bm-time{{font-size:9px;color:var(--muted);margin-top:3px;padding-top:3px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}}
+    .bm-info{{color:var(--accent);font-size:11px;opacity:.6}}
+    .bracket-match:hover .bm-info{{opacity:1}}
+
+    /* Modal */
+    .modal-backdrop{{position:fixed;inset:0;background:rgba(3,7,18,.75);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:1000;padding:20px;animation:fadeIn .18s ease-out}}
+    .modal-backdrop.open{{display:flex}}
+    @keyframes fadeIn{{from{{opacity:0}}to{{opacity:1}}}}
+    .modal-panel{{background:linear-gradient(160deg,#131b2e,#0f2a24);border:1px solid var(--line);border-radius:16px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;padding:24px;position:relative;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:slideUp .22s ease-out}}
+    @keyframes slideUp{{from{{transform:translateY(20px);opacity:0}}to{{transform:translateY(0);opacity:1}}}}
+    .modal-close{{position:absolute;top:12px;right:14px;background:rgba(255,255,255,.06);border:1px solid var(--line);color:var(--text);width:30px;height:30px;border-radius:50%;font-size:16px;cursor:pointer;display:grid;place-items:center;transition:background .12s}}
+    .modal-close:hover{{background:rgba(239,68,68,.2);border-color:var(--live)}}
+    .modal-round{{font-size:10px;text-transform:uppercase;letter-spacing:.15em;color:var(--accent);font-weight:600;margin-bottom:6px}}
+    .modal-headline{{font-size:22px;font-weight:700;margin:0 0 6px;line-height:1.3}}
+    .modal-time{{font-size:11px;color:var(--muted);margin-bottom:14px}}
+    .modal-verdict{{background:rgba(52,211,153,.08);border-left:3px solid var(--accent2);padding:10px 14px;border-radius:6px;font-size:13px;font-weight:500;color:var(--accent2);margin-bottom:14px}}
+    .modal-story{{font-size:13px;line-height:1.65;color:var(--text)}}
+    .modal-match-id{{font-size:9px;color:var(--muted);margin-top:14px;padding-top:10px;border-top:1px solid var(--line);letter-spacing:.05em}}
 
     /* Predictions */
     .pred-section{{margin-bottom:20px}}
@@ -477,6 +590,19 @@ def render_dashboard() -> str:
     <br>Data: <a href="https://worldcup26.ir">worldcup26.ir</a> &middot; Predictions for entertainment
   </footer>
 </div>
+
+<div id="analysis-modal" class="modal-backdrop" onclick="closeAnalysis(event)">
+  <div class="modal-panel" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="closeAnalysis()" aria-label="Close">&times;</button>
+    <div class="modal-round" id="mo-round"></div>
+    <h2 class="modal-headline" id="mo-headline"></h2>
+    <div class="modal-time" id="mo-time"></div>
+    <div class="modal-verdict" id="mo-verdict"></div>
+    <div class="modal-story" id="mo-story"></div>
+    <div class="modal-match-id" id="mo-mid"></div>
+  </div>
+</div>
+
 <script>
 function switchTab(id) {{
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -484,6 +610,26 @@ function switchTab(id) {{
   document.getElementById('tab-' + id).classList.add('active');
   event.target.classList.add('active');
 }}
+function showAnalysis(el) {{
+  document.getElementById('mo-round').textContent = el.dataset.round || '';
+  document.getElementById('mo-headline').textContent = el.dataset.headline || '';
+  document.getElementById('mo-time').textContent = el.dataset.time || '';
+  document.getElementById('mo-verdict').textContent = el.dataset.verdict || '';
+  document.getElementById('mo-story').textContent = el.dataset.story || '';
+  document.getElementById('mo-mid').textContent = el.dataset.matchId || '';
+  document.getElementById('analysis-modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}}
+function closeAnalysis() {{
+  document.getElementById('analysis-modal').classList.remove('open');
+  document.body.style.overflow = '';
+}}
+document.addEventListener('keydown', function(e) {{
+  if (e.key === 'Escape') {{
+    document.getElementById('analysis-modal').classList.remove('open');
+    document.body.style.overflow = '';
+  }}
+}});
 </script>
 </body>
 </html>'''

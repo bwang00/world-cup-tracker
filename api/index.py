@@ -1,41 +1,41 @@
 """
 FIFA World Cup 2026 Tracker — FastAPI on Vercel
-Cron: hourly fetch of fixtures/scores from API-Football
+Data source: https://worldcup26.ir (free, no auth)
+Cron: daily 7am Beijing time (23:00 UTC)
 Dashboard: Scores & Schedule | Predictions (tabbed)
 """
 
 from __future__ import annotations
 
 import json
-import os
 import urllib.request
 from datetime import date, datetime, timezone
-from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
 app = FastAPI(
     title="World Cup 2026 Tracker",
-    version="2.0.0",
+    version="3.0.0",
 )
 
 # --------------------------------------------------------------------------- #
 # Config                                                                      #
 # --------------------------------------------------------------------------- #
-API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY", "")
-API_BASE = "https://v3.football.api-sports.io"
-WORLD_CUP_LEAGUE_ID = 1  # FIFA World Cup
-WORLD_CUP_SEASON = 2026
+API_BASE = "https://worldcup26.ir/get"
+TOURNAMENT_END = date(2026, 7, 20)
 
-# Vercel doesn't have persistent filesystem in production, so we keep a
-# lightweight in-memory cache that gets populated on cron runs (and survives
-# within a single function instance's warm lifetime).
-_cache: dict[str, Any] = {"fixtures": [], "last_updated": None, "season_label": ""}
+# In-memory cache (survives within a warm function instance)
+_cache: dict[str, Any] = {
+    "games": [],
+    "teams": {},
+    "groups": [],
+    "last_updated": None,
+}
 
 # --------------------------------------------------------------------------- #
-# Predictions data                                                            #
+# Predictions                                                                 #
 # --------------------------------------------------------------------------- #
 PREDICTIONS = [
     {"team": "Argentina", "flag": "\U0001f1e6\U0001f1f7", "rating": 92, "chance": 15.5,
@@ -82,90 +82,53 @@ PREDICTIONS = [
 
 
 # --------------------------------------------------------------------------- #
-# Helpers — fetch from API-Football                                           #
+# Data fetching                                                               #
 # --------------------------------------------------------------------------- #
-def _api_get(endpoint: str, params: dict[str, str] | None = None) -> dict:
-    """Make a GET request to API-Football."""
-    if not API_FOOTBALL_KEY:
-        return {"response": []}
-    qs = "&".join(f"{k}={v}" for k, v in (params or {}).items())
-    url = f"{API_BASE}{endpoint}" + (f"?{qs}" if qs else "")
-    req = urllib.request.Request(url, headers={"x-apisports-key": API_FOOTBALL_KEY})
-    with urllib.request.urlopen(req, timeout=15) as resp:
+def _fetch_json(endpoint: str) -> Any:
+    url = f"{API_BASE}/{endpoint}"
+    req = urllib.request.Request(url, headers={"User-Agent": "WorldCupTracker/3.0"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
         return json.loads(resp.read())
 
 
-def fetch_fixtures() -> tuple[list[dict], str]:
-    """Fetch World Cup 2026 fixtures. Falls back to 2022 if 2026 has no data yet."""
-    data = _api_get("/fixtures", {
-        "league": str(WORLD_CUP_LEAGUE_ID),
-        "season": str(WORLD_CUP_SEASON),
-    })
-    season_label = "2026"
-    # If 2026 has no fixtures yet, fall back to 2022 as reference data
-    if not data.get("response"):
-        data = _api_get("/fixtures", {
-            "league": str(WORLD_CUP_LEAGUE_ID),
-            "season": "2022",
-        })
-        season_label = "2022 (reference — 2026 schedule not yet published)"
-    fixtures = []
-    for item in data.get("response", []):
-        fixture = item.get("fixture", {})
-        teams = item.get("teams", {})
-        goals = item.get("goals", {})
-        league = item.get("league", {})
-        fixtures.append({
-            "id": fixture.get("id"),
-            "date": fixture.get("date", ""),
-            "status": fixture.get("status", {}).get("short", "TBD"),
-            "status_long": fixture.get("status", {}).get("long", ""),
-            "venue": fixture.get("venue", {}).get("name", ""),
-            "city": fixture.get("venue", {}).get("city", ""),
-            "round": league.get("round", ""),
-            "home": {
-                "name": teams.get("home", {}).get("name", "TBD"),
-                "logo": teams.get("home", {}).get("logo", ""),
-            },
-            "away": {
-                "name": teams.get("away", {}).get("name", "TBD"),
-                "logo": teams.get("away", {}).get("logo", ""),
-            },
-            "score_home": goals.get("home"),
-            "score_away": goals.get("away"),
-        })
-    fixtures.sort(key=lambda f: f["date"])
-    return fixtures, season_label
+def refresh_cache() -> dict:
+    """Fetch games, teams, and groups from worldcup26.ir."""
+    games_data = _fetch_json("games")
+    teams_data = _fetch_json("teams")
+    groups_data = _fetch_json("groups")
 
+    games = games_data.get("games", games_data) if isinstance(games_data, dict) else games_data
+    teams_list = teams_data.get("teams", teams_data) if isinstance(teams_data, dict) else teams_data
+    groups = groups_data.get("groups", groups_data) if isinstance(groups_data, dict) else groups_data
 
-# --------------------------------------------------------------------------- #
-# Cron endpoint — called daily by Vercel Cron (7am Beijing / 23:00 UTC)                                #
-# --------------------------------------------------------------------------- #
-TOURNAMENT_END = date(2026, 7, 20)  # day after the final
+    # Build team lookup by id
+    teams_map = {}
+    for t in teams_list:
+        teams_map[t.get("id", t.get("_id"))] = t
 
-
-@app.get("/api/cron")
-def cron(request: Request):
-    """Vercel Cron handler: refresh fixtures cache daily at 7am Beijing time.
-    Automatically stops fetching once the tournament is over (after July 19, 2026)."""
-    today = date.today()
-    if today > TOURNAMENT_END:
-        return {
-            "ok": True,
-            "skipped": True,
-            "reason": "Tournament ended on 2026-07-19. Cron is inactive.",
-            "last_updated": _cache.get("last_updated"),
-        }
-    fixtures, season_label = fetch_fixtures()
-    _cache["fixtures"] = fixtures
-    _cache["season_label"] = season_label
+    _cache["games"] = games
+    _cache["teams"] = teams_map
+    _cache["groups"] = groups
     _cache["last_updated"] = datetime.now(timezone.utc).isoformat()
+
     return {
         "ok": True,
-        "fetched": len(fixtures),
-        "season": season_label,
+        "games": len(games),
+        "teams": len(teams_map),
+        "groups": len(groups),
         "last_updated": _cache["last_updated"],
     }
+
+
+# --------------------------------------------------------------------------- #
+# Cron endpoint                                                               #
+# --------------------------------------------------------------------------- #
+@app.get("/api/cron")
+def cron():
+    """Daily cron (7am Beijing / 23:00 UTC). Stops after tournament ends."""
+    if date.today() > TOURNAMENT_END:
+        return {"ok": True, "skipped": True, "reason": "Tournament ended 2026-07-19."}
+    return refresh_cache()
 
 
 # --------------------------------------------------------------------------- #
@@ -173,23 +136,22 @@ def cron(request: Request):
 # --------------------------------------------------------------------------- #
 @app.get("/api")
 def api_root():
-    days = (date(2026, 6, 11) - date.today()).days
     return {
         "name": "World Cup 2026 Tracker",
-        "version": "2.0.0",
-        "days_until_kickoff": max(days, 0),
-        "endpoints": ["/api/health", "/api/fixtures", "/api/predictions", "/api/cron"],
+        "version": "3.0.0",
+        "source": "worldcup26.ir",
+        "endpoints": ["/", "/api/health", "/api/games", "/api/predictions", "/api/cron"],
     }
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "last_updated": _cache.get("last_updated")}
+    return {"status": "ok", "last_updated": _cache.get("last_updated"), "cached_games": len(_cache["games"])}
 
 
-@app.get("/api/fixtures")
-def fixtures_endpoint():
-    return {"count": len(_cache["fixtures"]), "last_updated": _cache["last_updated"], "items": _cache["fixtures"]}
+@app.get("/api/games")
+def games_endpoint():
+    return {"count": len(_cache["games"]), "last_updated": _cache["last_updated"], "items": _cache["games"]}
 
 
 @app.get("/api/predictions")
@@ -201,52 +163,101 @@ def predictions_endpoint():
 # --------------------------------------------------------------------------- #
 # HTML Dashboard                                                              #
 # --------------------------------------------------------------------------- #
-def _render_fixtures_html(fixtures: list[dict]) -> str:
-    if not fixtures:
-        return """
-        <div class="empty-state">
-          <p class="empty-icon">&#9917;</p>
-          <h3>No fixture data yet</h3>
-          <p>The cron job fetches scores hourly from API-Football once the tournament schedule is published.<br>
-          If you just deployed, trigger a manual refresh at <a href="/api/cron">/api/cron</a>.</p>
-          <p class="hint">Make sure the <code>API_FOOTBALL_KEY</code> environment variable is set in Vercel.</p>
-        </div>"""
+ROUND_ORDER = {"group": 0, "r32": 1, "r16": 2, "qf": 3, "sf": 4, "3rd": 5, "final": 6}
+ROUND_LABELS = {"group": "Group Stage", "r32": "Round of 32", "r16": "Round of 16",
+                "qf": "Quarterfinals", "sf": "Semifinals", "3rd": "Third Place", "final": "Final"}
 
-    # Group by round
-    rounds: dict[str, list] = {}
-    for f in fixtures:
-        r = f.get("round") or "Scheduled"
-        rounds.setdefault(r, []).append(f)
+
+def _render_games_html(games: list[dict]) -> str:
+    if not games:
+        return '<div class="empty-state"><p class="empty-icon">&#9917;</p><h3>No data yet</h3><p>Trigger <a href="/api/cron">/api/cron</a> to fetch.</p></div>'
+
+    # Separate by status
+    live = [g for g in games if g.get("finished") != "TRUE" and g.get("time_elapsed") not in ("not_started", None, "")]
+    finished = [g for g in games if g.get("finished") == "TRUE"]
+    upcoming = [g for g in games if g.get("finished") != "TRUE" and g.get("time_elapsed") in ("not_started", None, "")]
+
+    # Sort finished by date descending (most recent first)
+    finished.sort(key=lambda g: g.get("local_date", ""), reverse=True)
+    upcoming.sort(key=lambda g: g.get("local_date", ""))
 
     html = ""
-    for rnd, matches in rounds.items():
-        html += f'<h3 class="round-header">{rnd}</h3><div class="matches">'
-        for m in matches:
-            dt = m["date"][:16].replace("T", " ") if m["date"] else "TBD"
-            sh = m["score_home"]
-            sa = m["score_away"]
-            score_display = f'{sh} - {sa}' if sh is not None else "vs"
-            status_class = "live" if m["status"] in ("1H", "2H", "HT", "ET", "P", "LIVE") else (
-                "ft" if m["status"] in ("FT", "AET", "PEN") else "")
-            status_label = m["status_long"] or m["status"]
-            html += f'''
-            <div class="match-card {status_class}">
-              <div class="match-time">{dt} <span class="status-badge {status_class}">{status_label}</span></div>
-              <div class="match-teams">
-                <div class="team home">
-                  {'<img src="'+m["home"]["logo"]+'" class="team-logo"/>' if m["home"]["logo"] else ''}
-                  <span>{m["home"]["name"]}</span>
-                </div>
-                <div class="score">{score_display}</div>
-                <div class="team away">
-                  <span>{m["away"]["name"]}</span>
-                  {'<img src="'+m["away"]["logo"]+'" class="team-logo"/>' if m["away"]["logo"] else ''}
-                </div>
-              </div>
-              <div class="match-venue">{m["venue"]}{", " + m["city"] if m["city"] else ""}</div>
-            </div>'''
+
+    # Live matches first
+    if live:
+        html += '<h3 class="section-header live-pulse">LIVE NOW</h3><div class="matches">'
+        for g in live:
+            html += _match_card(g, is_live=True)
         html += '</div>'
+
+    # Recent results (last 16)
+    if finished:
+        html += '<h3 class="section-header">Recent Results</h3><div class="matches">'
+        for g in finished[:16]:
+            html += _match_card(g, is_live=False)
+        html += '</div>'
+
+    # Upcoming
+    if upcoming:
+        html += '<h3 class="section-header">Upcoming</h3><div class="matches">'
+        for g in upcoming[:8]:
+            html += _match_card(g, is_live=False, upcoming=True)
+        html += '</div>'
+
     return html
+
+
+def _match_card(g: dict, is_live: bool = False, upcoming: bool = False) -> str:
+    home = g.get("home_team_name_en", "TBD")
+    away = g.get("away_team_name_en", "TBD")
+    hs = g.get("home_score", "-")
+    aws = g.get("away_score", "-")
+    dt = g.get("local_date", "TBD")
+    round_type = g.get("type", "group")
+    round_label = ROUND_LABELS.get(round_type, round_type.upper())
+    time_el = g.get("time_elapsed", "")
+    group = g.get("group", "")
+
+    status_class = "live" if is_live else ("ft" if not upcoming else "upcoming")
+    if is_live:
+        status_text = f"LIVE {time_el}'" if time_el else "LIVE"
+    elif upcoming:
+        status_text = "Upcoming"
+        hs = ""
+        aws = ""
+    else:
+        status_text = "FT"
+
+    score_display = f"{hs} - {aws}" if hs != "" else "vs"
+    group_badge = f' <span class="group-badge">Group {group}</span>' if round_type == "group" and group else ""
+    scorers_home = g.get("home_scorers", "")
+    scorers_away = g.get("away_scorers", "")
+    scorers_html = ""
+    if scorers_home and scorers_home != "null" and not upcoming:
+        scorers_html += f'<div class="scorers home-scorers">{_clean_scorers(scorers_home)}</div>'
+    if scorers_away and scorers_away != "null" and not upcoming:
+        scorers_html += f'<div class="scorers away-scorers">{_clean_scorers(scorers_away)}</div>'
+
+    return f'''
+    <div class="match-card {status_class}">
+      <div class="match-meta">
+        <span class="round-label">{round_label}{group_badge}</span>
+        <span class="status-badge {status_class}">{status_text}</span>
+      </div>
+      <div class="match-teams">
+        <div class="team home"><span class="team-name">{home}</span></div>
+        <div class="score">{score_display}</div>
+        <div class="team away"><span class="team-name">{away}</span></div>
+      </div>
+      {scorers_html}
+      <div class="match-date">{dt}</div>
+    </div>'''
+
+
+def _clean_scorers(s: str) -> str:
+    """Clean up scorer strings like {"Player 9'","Player 67'"}"""
+    s = s.replace("{", "").replace("}", "").replace('"', '').replace("\u201c", "").replace("\u201d", "")
+    return s
 
 
 def _render_predictions_html() -> str:
@@ -276,10 +287,13 @@ def _render_predictions_html() -> str:
 
 
 def render_dashboard() -> str:
-    days = (date(2026, 6, 11) - date.today()).days
+    games = _cache["games"]
     last_upd = _cache.get("last_updated") or "never"
-    season_label = _cache.get("season_label") or "no data yet"
-    fixtures_html = _render_fixtures_html(_cache["fixtures"])
+    total = len(games)
+    finished = sum(1 for g in games if g.get("finished") == "TRUE")
+    live = sum(1 for g in games if g.get("finished") != "TRUE" and g.get("time_elapsed") not in ("not_started", None, ""))
+
+    games_html = _render_games_html(games)
     predictions_html = _render_predictions_html()
 
     return f'''<!doctype html>
@@ -304,7 +318,8 @@ def render_dashboard() -> str:
     .sub{{color:var(--muted);font-size:12px}}
     .chips{{display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
     .chip{{background:rgba(255,255,255,.05);border:1px solid var(--line);padding:5px 11px;border-radius:999px;font-size:11px}}
-    .countdown{{background:linear-gradient(135deg,#fbbf24,#f97316);color:#1a0f00;padding:5px 12px;border-radius:999px;font-weight:700;font-size:11px}}
+    .chip.live{{background:rgba(239,68,68,.15);border-color:var(--live);color:var(--live);font-weight:600;animation:pulse 2s infinite}}
+    @keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:.6}}}}
 
     /* Tabs */
     .tabs{{display:flex;gap:4px;margin-bottom:20px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:12px;padding:4px;width:fit-content}}
@@ -314,31 +329,34 @@ def render_dashboard() -> str:
     .tab-panel{{display:none}}
     .tab-panel.active{{display:block}}
 
-    /* Fixtures */
-    .round-header{{margin:20px 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent2)}}
-    .matches{{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px}}
+    /* Matches */
+    .section-header{{margin:20px 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent2)}}
+    .section-header.live-pulse{{color:var(--live);animation:pulse 2s infinite}}
+    .matches{{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}}
     .match-card{{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;transition:border-color .12s}}
     .match-card:hover{{border-color:var(--accent)}}
     .match-card.live{{border-color:var(--live);box-shadow:0 0 12px rgba(239,68,68,.15)}}
-    .match-card.ft{{opacity:.85}}
-    .match-time{{font-size:11px;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:8px}}
-    .status-badge{{padding:2px 7px;border-radius:5px;font-size:10px;font-weight:600;text-transform:uppercase}}
-    .status-badge.live{{background:var(--live);color:#fff}}
-    .status-badge.ft{{background:rgba(255,255,255,.1);color:var(--muted)}}
-    .match-teams{{display:flex;align-items:center;justify-content:space-between;gap:8px}}
-    .team{{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;flex:1}}
-    .team.away{{justify-content:flex-end;text-align:right}}
-    .team-logo{{width:20px;height:20px;border-radius:2px}}
-    .score{{font-size:18px;font-weight:700;min-width:50px;text-align:center;color:var(--accent)}}
-    .match-venue{{font-size:11px;color:var(--muted);margin-top:6px}}
+    .match-card.ft{{opacity:.9}}
+    .match-meta{{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}}
+    .round-label{{font-size:11px;color:var(--muted)}}
+    .group-badge{{background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.2);padding:1px 6px;border-radius:4px;font-size:10px;color:var(--accent);margin-left:6px}}
+    .status-badge{{padding:2px 8px;border-radius:5px;font-size:10px;font-weight:600;text-transform:uppercase}}
+    .status-badge.live{{background:var(--live);color:#fff;animation:pulse 2s infinite}}
+    .status-badge.ft{{background:rgba(255,255,255,.08);color:var(--muted)}}
+    .status-badge.upcoming{{background:rgba(34,211,238,.1);color:var(--accent)}}
+    .match-teams{{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0}}
+    .team{{flex:1;font-size:14px;font-weight:500}}
+    .team.away{{text-align:right}}
+    .score{{font-size:20px;font-weight:700;min-width:60px;text-align:center;color:var(--accent)}}
+    .match-card.live .score{{color:var(--live)}}
+    .scorers{{font-size:11px;color:var(--muted);margin:4px 0}}
+    .match-date{{font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--line)}}
 
-    /* Empty state */
+    /* Empty */
     .empty-state{{text-align:center;padding:48px 20px;color:var(--muted)}}
-    .empty-state .empty-icon{{font-size:48px;margin-bottom:8px}}
-    .empty-state h3{{color:var(--text);margin:0 0 8px}}
-    .empty-state p{{margin:4px 0;font-size:13px}}
-    .empty-state .hint{{margin-top:14px;font-size:11px;color:var(--muted)}}
-    .empty-state code{{background:rgba(255,255,255,.08);padding:2px 6px;border-radius:4px;font-size:11px}}
+    .empty-state .empty-icon{{font-size:48px}}
+    .empty-state h3{{color:var(--text);margin:8px 0}}
+    .empty-state a{{color:var(--accent)}}
 
     /* Predictions */
     .pred-table{{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}}
@@ -370,9 +388,9 @@ def render_dashboard() -> str:
       </div>
     </div>
     <div class="chips">
-      <span class="countdown">{"&#9917; LIVE" if days <= 0 else f"{days} days to kickoff"}</span>
+      {'<span class="chip live">&#128308; ' + str(live) + ' LIVE</span>' if live > 0 else ''}
+      <span class="chip">{finished}/{total} played</span>
       <span class="chip">48 teams</span>
-      <span class="chip">Updated daily 7am Beijing</span>
     </div>
   </header>
 
@@ -382,18 +400,18 @@ def render_dashboard() -> str:
   </div>
 
   <div id="tab-scores" class="tab-panel active">
-    {fixtures_html}
-    <p class="update-note">Season: {season_label} &middot; Last refreshed: {last_upd} &middot; Cron: daily 7am Beijing</p>
+    {games_html}
+    <p class="update-note">Last refreshed: {last_upd} &middot; Cron: daily 7am Beijing &middot; Source: worldcup26.ir</p>
   </div>
 
   <div id="tab-predictions" class="tab-panel">
-    <p style="color:var(--muted);font-size:12px;margin-bottom:14px;">Heuristic power ratings (0-100) and title-probability estimates based on squad depth, recent form, and pedigree.</p>
+    <p style="color:var(--muted);font-size:12px;margin-bottom:14px;">Pre-tournament heuristic ratings (0-100) and title-probability estimates. Updated as tournament progresses.</p>
     {predictions_html}
   </div>
 
   <footer>
-    <a href="/api">/api</a> &middot; <a href="/api/fixtures">/api/fixtures</a> &middot; <a href="/api/predictions">/api/predictions</a> &middot; <a href="/api/cron">/api/cron</a>
-    <br>Powered by API-Football &middot; Predictions for entertainment only
+    <a href="/api">/api</a> &middot; <a href="/api/games">/api/games</a> &middot; <a href="/api/predictions">/api/predictions</a> &middot; <a href="/api/cron">/api/cron</a>
+    <br>Data: <a href="https://worldcup26.ir" target="_blank">worldcup26.ir</a> (open source) &middot; Predictions for entertainment only
   </footer>
 </div>
 <script>
@@ -410,13 +428,10 @@ function switchTab(id) {{
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard():
-    # Lazy-load: if cache is empty (cold start), fetch fixtures now
-    if not _cache["fixtures"] and API_FOOTBALL_KEY:
+    # Lazy-load on cold start
+    if not _cache["games"]:
         try:
-            fixtures, season_label = fetch_fixtures()
-            _cache["fixtures"] = fixtures
-            _cache["season_label"] = season_label
-            _cache["last_updated"] = datetime.now(timezone.utc).isoformat()
+            refresh_cache()
         except Exception:
             pass
     return HTMLResponse(render_dashboard())

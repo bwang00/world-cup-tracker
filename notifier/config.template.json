@@ -1,0 +1,10 @@
+{
+  "webhook_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY_HERE",
+  "poll_interval_active": 30,
+  "poll_interval_idle": 300,
+  "poll_interval_default": 60,
+  "timezone": "Asia/Shanghai",
+  "tournament_end": "2026-07-20",
+  "log_level": "INFO",
+  "api_base_url": "https://worldcup26.ir/get"
+}

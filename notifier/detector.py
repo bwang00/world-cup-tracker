@@ -61,6 +61,8 @@ def detect_changes(matches: list, state: dict) -> tuple:
                         "type": "goal",
                         "match_id": match_id,
                         "match": match,
+                        "side": "home",
+                        "goal_number": goal_num,
                         "detail": f"{match['home']} goal! ({home_score}-{away_score})",
                     })
                     notified.append(event_id)
@@ -74,6 +76,8 @@ def detect_changes(matches: list, state: dict) -> tuple:
                         "type": "goal",
                         "match_id": match_id,
                         "match": match,
+                        "side": "away",
+                        "goal_number": goal_num,
                         "detail": f"{match['away']} goal! ({home_score}-{away_score})",
                     })
                     notified.append(event_id)

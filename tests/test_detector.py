@@ -46,7 +46,36 @@ def test_goal_detected():
     assert len(events) == 1
     assert events[0]["type"] == "goal"
     assert events[0]["match_id"] == "73"
+    assert events[0]["side"] == "home"
+    assert events[0]["goal_number"] == 2
     assert "goal_home_2" in new_state["matches"]["73"]["events_notified"]
+
+
+def test_away_goal_has_side_and_number():
+    """Away goal events must include side='away' and correct goal_number for sender compat."""
+    matches = [{
+        "id": "73", "home": "Brazil", "away": "Japan",
+        "home_score": 1, "away_score": 1,
+        "home_scorers": ["Vinicius Jr. 23'"], "away_scorers": ["Mitoma 45'"],
+        "is_finished": False, "is_live": True,
+        "minute": "46", "stage": "16强", "local_date": "07/05/2026 20:00", "type": "r16"
+    }]
+    state = {
+        "matches": {
+            "73": {
+                "home": "Brazil", "away": "Japan",
+                "home_score": 1, "away_score": 0,
+                "status": "in_progress",
+                "events_notified": ["goal_home_1"]
+            }
+        }
+    }
+    events, new_state = detect_changes(matches, state)
+    assert len(events) == 1
+    assert events[0]["type"] == "goal"
+    assert events[0]["side"] == "away"
+    assert events[0]["goal_number"] == 1
+    assert "goal_away_1" in new_state["matches"]["73"]["events_notified"]
 
 
 def test_match_finished_detected():

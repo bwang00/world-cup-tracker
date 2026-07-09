@@ -1,5 +1,5 @@
 {
-  "webhook_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY_HERE",
+  "sendkey": "SCT376902TfPJGRf7sYLkfQAtM5A7qw9Oi",
   "poll_interval_active": 30,
   "poll_interval_idle": 300,
   "poll_interval_default": 60,

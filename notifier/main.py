@@ -38,7 +38,7 @@ def run_once(config: dict, state_path: str) -> bool:
         else:
             continue
 
-        success = send_notification(config["webhook_url"], message)
+        success = send_notification(config["sendkey"], message)
         if not success:
             all_sent = False
             logger.error("Failed to send notification for event: %s", event["type"])
@@ -129,7 +129,7 @@ def main():
             if consecutive_failures > 10:
                 # Try to send self-diagnosis alert
                 send_notification(
-                    config["webhook_url"],
+                    config["sendkey"],
                     "⚠️ 通知服务异常\n\n世界杯通知服务已连续失败 %d 次，最近错误：%s" % (
                         consecutive_failures, str(e)[:100]
                     )

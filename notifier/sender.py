@@ -1,7 +1,8 @@
 import json
 import logging
-import urllib.request
 import urllib.error
+import urllib.parse
+import urllib.request
 
 logger = logging.getLogger(__name__)
 
@@ -107,27 +108,42 @@ def format_match_finished_message(event: dict) -> str:
     return msg
 
 
-def send_notification(webhook_url: str, message: str) -> bool:
-    """Send a markdown message to WeCom group webhook.
+def send_notification(sendkey: str, message: str) -> bool:
+    """Send a notification via Server酱 (ServerChan).
 
-    Returns True if delivery succeeded (HTTP 200), False otherwise.
+    Args:
+        sendkey: The ServerChan SendKey (e.g. 'SCT376902T...')
+        message: The message body in markdown format.
+
+    Returns True if delivery succeeded, False otherwise.
     """
-    payload = json.dumps({
-        "msgtype": "markdown",
-        "markdown": {"content": message}
+    # Extract first line as title (strip emoji prefix)
+    title = message.split("\n")[0].strip()
+    if len(title) > 32:
+        title = title[:32]
+
+    url = f"https://sctapi.ftqq.com/{sendkey}.send"
+    payload = urllib.parse.urlencode({
+        "title": title,
+        "desp": message
     }).encode('utf-8')
 
     try:
         req = urllib.request.Request(
-            webhook_url,
+            url,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
             method="POST"
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = resp.read().decode('utf-8')
-            logger.debug("Webhook response: %s", body)
-            return True
+            result = json.loads(body)
+            if result.get("code") == 0:
+                logger.debug("ServerChan response: %s", body)
+                return True
+            else:
+                logger.error("ServerChan error: %s", body)
+                return False
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, Exception) as e:
         logger.error("Failed to send notification: %s", e)
         return False
